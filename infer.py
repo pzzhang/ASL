@@ -5,7 +5,7 @@ from src.models import create_model
 import argparse
 import matplotlib
 
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
@@ -61,14 +61,16 @@ def main():
 
     # displaying image
     print('showing image on screen...')
+    output_file = args.pic_path.replace('.jpg', '_tag.jpg')
     fig = plt.figure()
-    plt.imshow(im)
+    # plt.imshow(im)
     plt.axis('off')
     plt.axis('tight')
     # plt.rcParams["axes.titlesize"] = 10
     plt.title("detected classes: {}".format(detected_classes))
 
-    plt.show()
+    # plt.show()
+    plt.savefig(output_file)
     print('done\n')
 
 
