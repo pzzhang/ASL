@@ -33,6 +33,7 @@ run
 yamls
 aml_config
 models_local
+pics
 
 # compilation and distribution
 __pycache__

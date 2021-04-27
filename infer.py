@@ -63,7 +63,7 @@ def main():
     print('showing image on screen...')
     output_file = args.pic_path.replace('.jpg', '_tag.jpg')
     fig = plt.figure()
-    # plt.imshow(im)
+    plt.imshow(im)
     plt.axis('off')
     plt.axis('tight')
     # plt.rcParams["axes.titlesize"] = 10
