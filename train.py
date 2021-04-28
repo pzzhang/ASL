@@ -4,6 +4,7 @@ import torch
 import torch.nn.parallel
 import torch.optim
 import torch.utils.data.distributed
+import torch.distributed as dist
 import torchvision.transforms as transforms
 from torch.optim import lr_scheduler
 from src.helper_functions.helper_functions import mAP, CocoDetection, CutoutPIL, ModelEma, add_weight_decay, strip_prefix_if_present
@@ -32,11 +33,38 @@ parser.add_argument('--drop', default=0.0, type=float,
                     metavar='N', help='attention drop rate')
 parser.add_argument('--drop_path', default=0.2, type=float,
                     metavar='N', help='vit drop path rate')
+parser.add_argument('--dtgfl', action='store_true',
+            help='using disable_torch_grad_focal_loss in ASL loss')
+parser.add_argument('--output', metavar='DIR',
+                    default=os.getenv('PT_OUTPUT_DIR', '/tmp'),
+                    help='path to output folder')
+# distribution training
+parser.add_argument("--local_rank", type=int, default=-1,
+                    help='local rank for DistributedDataParallel')
 
 
 def main():
     args = parser.parse_args()
     args.do_bottleneck_head = False
+
+    # setup dist training
+    args.distributed = False
+    if 'WORLD_SIZE' in os.environ:
+        args.distributed = int(os.environ['WORLD_SIZE']) > 1
+    args.device = 'cuda'
+    args.world_size = 1
+    args.rank = 0  # global rank
+
+    if args.distributed:
+        args.device = 'cuda:%d' % args.local_rank
+        torch.cuda.set_device(args.local_rank)
+        torch.distributed.init_process_group(backend='nccl', init_method='env://')
+        args.world_size = torch.distributed.get_world_size()
+        args.rank = torch.distributed.get_rank()
+        print('Training in distributed mode with multiple processes, 1 GPU per process. Process %d, total %d.' % (args.rank, args.world_size))
+    else:
+        print('Training with a single process on 1 GPUs.')
+    assert args.rank >= 0
 
     # Setup model
     print('creating model...')
@@ -61,6 +89,9 @@ def main():
                              (k in model.state_dict() and 'head.fc' not in k)}
         model.load_state_dict(filtered_dict, strict=False)
     print('done\n')
+
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], broadcast_buffers=False)
 
     # COCO Data loading
     instances_path_val = os.path.join(args.data, 'annotations/instances_val2014.json')
@@ -87,28 +118,40 @@ def main():
                                   ]))
     print("len(val_dataset)): ", len(val_dataset))
     print("len(train_dataset)): ", len(train_dataset))
+    if args.distributed:
+        assert args.batch_size // dist.get_world_size() == args.batch_size / dist.get_world_size(), 'Batch size is not divisible by num of gpus.'
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size // dist.get_world_size(),
+            num_workers=args.workers, pin_memory=True, sampler=train_sampler,
+            drop_last=True)
 
-    # Pytorch Data loader
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=args.batch_size // dist.get_world_size(),
+            num_workers=args.workers, pin_memory=False, sampler=val_sampler)
+    else:
+        # Pytorch Data loader
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True)
 
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=False)
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=False)
 
     # Actuall Training
-    train_multi_label_coco(model, train_loader, val_loader, args.lr)
+    train_multi_label_coco(model, train_loader, val_loader, args.lr, args)
 
 
-def train_multi_label_coco(model, train_loader, val_loader, lr):
+def train_multi_label_coco(model, train_loader, val_loader, lr, args):
     ema = ModelEma(model, 0.9997)  # 0.9997^641=0.82
 
     # set optimizer
     Epochs = 80
     Stop_epoch = 40
     weight_decay = 1e-4
-    criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
+    criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=args.dtgfl)
     parameters = add_weight_decay(model, weight_decay)
     optimizer = torch.optim.Adam(params=parameters, lr=lr, weight_decay=0)  # true wd, filter_bias_and_bn
     steps_per_epoch = len(train_loader)
@@ -119,6 +162,8 @@ def train_multi_label_coco(model, train_loader, val_loader, lr):
     trainInfoList = []
     scaler = GradScaler()
     for epoch in range(Epochs):
+        if args.distributed:
+            train_loader.sampler.set_epoch(epoch)
         if epoch > Stop_epoch:
             break
         for i, (inputData, target) in enumerate(train_loader):
@@ -145,26 +190,42 @@ def train_multi_label_coco(model, train_loader, val_loader, lr):
                 trainInfoList.append([epoch, i, loss.item()])
                 print('Epoch [{}/{}], Step [{}/{}], LR {:.1e}, Loss: {:.1f}'
                       .format(epoch, Epochs, str(i).zfill(3), str(steps_per_epoch).zfill(3),
-                              scheduler.get_last_lr()[0], \
-                              loss.item()))
-
-        try:
-            torch.save(model.state_dict(), os.path.join(
-                'models/', 'model-{}-{}.ckpt'.format(epoch + 1, i + 1)))
-        except:
-            pass
+                              scheduler.get_last_lr()[0], loss.item()))
 
         model.eval()
-        mAP_score = validate_multi(val_loader, model, ema)
+        mAP_score_regular, mAP_score_ema = validate_multi(val_loader, model, ema)
         model.train()
-        if mAP_score > highest_mAP:
-            highest_mAP = mAP_score
-            try:
-                torch.save(model.state_dict(), os.path.join(
-                    'models/', 'model-highest.ckpt'))
-            except:
-                pass
-        print('current_mAP = {:.2f}, highest_mAP = {:.2f}\n'.format(mAP_score, highest_mAP))
+
+        if (not args.distributed) or (args.distributed and dist.get_rank() == 0):
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'epoch': epoch,
+                'mAP': mAP_score_regular
+            },
+                savedir=args.output,
+                savedname='model-{}-{}.ckpt'.format(epoch + 1, i + 1),
+                is_best=mAP_score_regular > mAP_score_ema and mAP_score_regular > highest_mAP)
+
+            save_checkpoint({
+                'state_dict': ema.module.state_dict(),
+                'epoch': epoch,
+                'mAP': mAP_score_ema
+            },
+                savedir=args.output,
+                savedname='model-{}-{}-{}.ckpt'.format('ema', epoch + 1, i + 1),
+                is_best=mAP_score_ema > mAP_score_regular and mAP_score_ema > highest_mAP)
+
+        mAP_score = max(mAP_score_regular, mAP_score_ema)
+        highest_mAP = max(highest_mAP, mAP_score)
+        print('current_mAP = {:.4f}, highest_mAP = {:.4f}\n'.format(
+            mAP_score, highest_mAP)
+        )
+
+
+def save_checkpoint(state_dict, savedir, savedname, is_best):
+    torch.save(state_dict, os.path.join(savedir, savedname))
+    if is_best:
+        torch.save(state_dict, os.path.join(savedir, 'model-highest.ckpt'))
 
 
 def validate_multi(val_loader, model, ema_model):
@@ -190,7 +251,7 @@ def validate_multi(val_loader, model, ema_model):
     mAP_score_regular = mAP(torch.cat(targets).numpy(), torch.cat(preds_regular).numpy())
     mAP_score_ema = mAP(torch.cat(targets).numpy(), torch.cat(preds_ema).numpy())
     print("mAP score regular {:.2f}, mAP score EMA {:.2f}".format(mAP_score_regular, mAP_score_ema))
-    return max(mAP_score_regular, mAP_score_ema)
+    return mAP_score_regular, mAP_score_ema
 
 
 if __name__ == '__main__':
