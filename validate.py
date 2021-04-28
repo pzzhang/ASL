@@ -16,8 +16,8 @@ import numpy as np
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR', help='path to dataset')
-parser.add_argument('--model-name', default='tresnet_l')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-name', default='')
+parser.add_argument('--model-path', default='', type=str)
 parser.add_argument('--num-classes', default=80)
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 16)')
@@ -29,6 +29,10 @@ parser.add_argument('-b', '--batch-size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 16)')
 parser.add_argument('--print-freq', '-p', default=64, type=int,
                     metavar='N', help='print frequency (default: 64)')
+parser.add_argument('--drop', default=0.0, type=float,
+                    metavar='N', help='attention drop rate')
+parser.add_argument('--drop_path', default=0.2, type=float,
+                    metavar='N', help='vit drop path rate')
 
 
 def main():

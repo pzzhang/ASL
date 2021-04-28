@@ -1,4 +1,5 @@
 import os
+import logging
 from copy import deepcopy
 import random
 import time
@@ -195,3 +196,14 @@ def add_weight_decay(model, weight_decay=1e-4, skip_list=()):
     return [
         {'params': no_decay, 'weight_decay': 0.},
         {'params': decay, 'weight_decay': weight_decay}]
+
+
+def strip_prefix_if_present(state_dict, prefix):
+    keys = sorted(state_dict.keys())
+    if not all(key.startswith(prefix) for key in keys):
+        return state_dict
+    from collections import OrderedDict
+    stripped_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        stripped_state_dict[key.replace(prefix, "")] = value
+    return stripped_state_dict

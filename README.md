@@ -94,14 +94,21 @@ For the single-label case (softmax), the implementations is called:
 In this [link](MODEL_ZOO.md), we provide pre-trained models on various
 dataset. 
 
+## Training Code
+```
+python train.py /home/penzhan/vlpdatasets/data/coco \
+--model-name=tresnet_l \
+--model-path=./models_local/MS_COCO_TRresNet_L_448_86.6.pth
+```
+
 ## Validation Code
 Thanks to external contribution of @hellbell, we now provide a
 validation code that repdroduces the article results on MS-COCO:
 
 ```
-python validate.py  \
---model_name=tresnet_l \
---model_path=./models_local/MS_COCO_TRresNet_L_448_86.6.pth
+python validate.py /home/penzhan/vlpdatasets/data/coco \
+--model-name=tresnet_l \
+--model-path=./models_local/MS_COCO_TRresNet_L_448_86.6.pth
 ```
 
 ## Inference Code

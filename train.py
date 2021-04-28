@@ -6,7 +6,7 @@ import torch.optim
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 from torch.optim import lr_scheduler
-from src.helper_functions.helper_functions import mAP, CocoDetection, CutoutPIL, ModelEma, add_weight_decay
+from src.helper_functions.helper_functions import mAP, CocoDetection, CutoutPIL, ModelEma, add_weight_decay, strip_prefix_if_present
 from src.models import create_model
 from src.loss_functions.losses import AsymmetricLoss
 from randaugment import RandAugment
@@ -15,8 +15,8 @@ from torch.cuda.amp import GradScaler, autocast
 parser = argparse.ArgumentParser(description='PyTorch MS_COCO Training')
 parser.add_argument('data', metavar='DIR', help='path to dataset', default='/home/MSCOCO_2014/')
 parser.add_argument('--lr', default=1e-4, type=float)
-parser.add_argument('--model-name', default='tresnet_m')
-parser.add_argument('--model-path', default='./tresnet_m.pth', type=str)
+parser.add_argument('--model-name', default='', type=str)
+parser.add_argument('--model-path', default='', type=str)
 parser.add_argument('--num-classes', default=80)
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 16)')
@@ -28,6 +28,10 @@ parser.add_argument('-b', '--batch-size', default=128, type=int,
                     metavar='N', help='mini-batch size (default: 16)')
 parser.add_argument('--print-freq', '-p', default=64, type=int,
                     metavar='N', help='print frequency (default: 64)')
+parser.add_argument('--drop', default=0.0, type=float,
+                    metavar='N', help='attention drop rate')
+parser.add_argument('--drop_path', default=0.2, type=float,
+                    metavar='N', help='vit drop path rate')
 
 
 def main():
@@ -39,8 +43,22 @@ def main():
     model = create_model(args).cuda()
     if args.model_path:  # make sure to load pretrained ImageNet model
         state = torch.load(args.model_path, map_location='cpu')
-        filtered_dict = {k: v for k, v in state['model'].items() if
-                         (k in model.state_dict() and 'head.fc' not in k)}
+        if 'net' in state:
+            state = state['net']
+        if 'model' in state:
+            state = state['model']
+        state = strip_prefix_if_present(
+            state, prefix="module."
+        )
+        if args.model_name.startswith('resne'):
+            filtered_dict = {k: v for k, v in state.items() if
+                             (k in model.state_dict() and 'fc' not in k)}
+        elif args.model_name.startswith('deit_'):
+            filtered_dict = {k: v for k, v in state.items() if
+                             (k in model.state_dict() and 'head' not in k)}
+        else:
+            filtered_dict = {k: v for k, v in state.items() if
+                             (k in model.state_dict() and 'head.fc' not in k)}
         model.load_state_dict(filtered_dict, strict=False)
     print('done\n')
 
