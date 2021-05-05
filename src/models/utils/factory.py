@@ -4,7 +4,7 @@ import torchvision.models as tvmodels
 
 logger = logging.getLogger(__name__)
 
-from ..tresnet import TResnetM, TResnetL, TResnetXL
+# from ..tresnet import TResnetM, TResnetL, TResnetXL
 from ..vision_transformer import *
 
 

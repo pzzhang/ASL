@@ -4,6 +4,7 @@
 import argparse
 import time
 import torch
+import torch.nn as nn
 import torch.nn.parallel
 import torch.optim
 import torch.utils.data.distributed
@@ -42,12 +43,13 @@ def main():
     # setup model
     print('creating and loading the model...')
     state = torch.load(args.model_path, map_location='cpu')
-    args.num_classes = state['num_classes']
+    # args.num_classes = state['num_classes']
     args.do_bottleneck_head = False
-    model = create_model(args).cuda()
-    model.load_state_dict(state['model'], strict=True)
+    model = create_model(args)
+    model = nn.DataParallel(model).cuda()
+    model.load_state_dict(state['state_dict'], strict=True)
     model.eval()
-    classes_list = np.array(list(state['idx_to_class'].values()))
+    # classes_list = np.array(list(state['idx_to_class'].values()))
     print('done\n')
 
     # Data loading code
@@ -55,7 +57,7 @@ def main():
                                      std=[1, 1, 1])
 
     instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
-    data_path = os.path.join(args.data, 'val2014')
+    data_path = os.path.join(args.data, 'images/val2014')
     val_dataset = CocoDetection(data_path,
                                 instances_path,
                                 transforms.Compose([

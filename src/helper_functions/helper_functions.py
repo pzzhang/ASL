@@ -12,6 +12,7 @@ import torch
 from PIL import ImageDraw
 from pycocotools.coco import COCO
 
+from IPython import embed
 
 def parse_args(parser):
     # parsing args
