@@ -2,7 +2,7 @@
 *.pth
 *.pkl
 *.npy
-*.ipynb
+*.ipynb_checkpoints
 
 # Editor temporaries
 *.swn

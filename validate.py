@@ -15,6 +15,8 @@ from src.helper_functions.helper_functions import mAP, AverageMeter, CocoDetecti
 from src.models import create_model
 import numpy as np
 
+from IPython import embed
+
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--model-name', default='')
@@ -43,13 +45,14 @@ def main():
     # setup model
     print('creating and loading the model...')
     state = torch.load(args.model_path, map_location='cpu')
-    # args.num_classes = state['num_classes']
+    embed()
+    args.num_classes = state['num_classes']
     args.do_bottleneck_head = False
     model = create_model(args)
     model = nn.DataParallel(model).cuda()
     model.load_state_dict(state['state_dict'], strict=True)
     model.eval()
-    # classes_list = np.array(list(state['idx_to_class'].values()))
+    classes_list = np.array(list(state['idx_to_class'].values()))
     print('done\n')
 
     # Data loading code
